@@ -1,9 +1,9 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 16
-VisualStudioVersion = 16.0.30804.86
+# Visual Studio Version 17
+VisualStudioVersion = 17.9.34728.123
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DiscordNetBotTemplate", "DiscordNetBotTemplate\DiscordNetBotTemplate.csproj", "{964A474D-EDF0-4AE2-9B62-498B77E2281F}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "GFDeckMaid", "DiscordNetBotTemplate\GFDeckMaid.csproj", "{964A474D-EDF0-4AE2-9B62-498B77E2281F}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

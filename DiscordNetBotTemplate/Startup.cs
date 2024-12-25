@@ -1,70 +1,95 @@
 ﻿using System;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Discord;
 using Discord.Commands;
 using Discord.WebSocket;
 using DiscordNetBotTemplate.Services;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Newtonsoft.Json.Linq;
 
-namespace DiscordNetBotTemplate;
-
-public class Startup
+namespace DiscordNetBotTemplate
 {
-    private DiscordSocketClient _client;
-        
-    public async Task Initialize()
+    public class Startup
     {
-        // You should dispose a service provider created using ASP.NET
-        // when you are finished using it, at the end of your app's lifetime.
-        // If you use another dependency injection framework, you should inspect
-        // its documentation for the best way to do this.
-        await using var services = ConfigureServices();
-        _client = services.GetRequiredService<DiscordSocketClient>();
+        private DiscordSocketClient _client;
+        private IConfiguration _configuration;
 
-        _client.Ready += OnReady;
-        _client.Log += LogAsync;
-        services.GetRequiredService<CommandService>().Log += LogAsync;
+        public async Task Initialize()
+        {
+            // Load configuration
+            var configurationBuilder = new ConfigurationBuilder()
+                .SetBasePath(Directory.GetCurrentDirectory())
+                .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
+                .AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true)
+                .AddEnvironmentVariables()
+                .Build();
 
-        // Tokens should be considered secret data and never hard-coded.
-        // We can read from the environment variable to avoid hardcoding.
-        await _client.LoginAsync(TokenType.Bot, Environment.GetEnvironmentVariable("DISCORD_BOT_TOKEN"));
-        await _client.StartAsync();
+            // Replace placeholders in configuration with environment variables
+            var jsonConfig = File.ReadAllText("appsettings.Local.json");
+            var jObject = JObject.Parse(jsonConfig);
+            var token = Environment.GetEnvironmentVariable("TOKEN");
+            jObject["DiscordBot"]["TOKEN"] = token;
 
-        // Here we initialize the logic required to register our commands.
-        await services.GetRequiredService<CommandHandlingService>().InitializeAsync();
+            _configuration = new ConfigurationBuilder()
+                .AddJsonStream(new MemoryStream(System.Text.Encoding.UTF8.GetBytes(jObject.ToString())))
+                .AddEnvironmentVariables()
+                .Build();
 
-        await Task.Delay(Timeout.Infinite);
-    }
-        
-    private Task OnReady()
-    {
-        // Logs the bot name and all the servers that it's connected to
-        Console.WriteLine($"Connected to these servers as '{_client.CurrentUser.Username}': ");
-        foreach (var guild in _client.Guilds) 
-            Console.WriteLine($"- {guild.Name}");
+            // You should dispose a service provider created using ASP.NET
+            // when you are finished using it, at the end of your app's lifetime.
+            // If you use another dependency injection framework, you should inspect
+            // its documentation for the best way to do this.
+            await using var services = ConfigureServices();
+            _client = services.GetRequiredService<DiscordSocketClient>();
 
-        // Set the activity from the environment variable or fallback to 'I'm alive!'
-        _client.SetGameAsync(Environment.GetEnvironmentVariable("DISCORD_BOT_ACTIVITY") ?? "I'm alive!", 
-            type: ActivityType.CustomStatus);
-        Console.WriteLine($"Activity set to '{_client.Activity.Name}'");
+            _client.Ready += OnReady;
+            _client.Log += LogAsync;
+            services.GetRequiredService<CommandService>().Log += LogAsync;
 
-        return Task.CompletedTask;
-    }
+            var tokenFromConfig = _configuration["DiscordBot:TOKEN"];
 
-    private static Task LogAsync(LogMessage log)
-    {
-        Console.WriteLine(log.ToString());
+            // Tokens should be considered secret data and never hard-coded.
+            // We can read from the environment variable to avoid hardcoding.
+            await _client.LoginAsync(TokenType.Bot, tokenFromConfig);
+            await _client.StartAsync();
 
-        return Task.CompletedTask;
-    }
+            // Here we initialize the logic required to register our commands.
+            await services.GetRequiredService<CommandHandlingService>().InitializeAsync();
 
-    private static ServiceProvider ConfigureServices()
-    {
-        return new ServiceCollection()
-            .AddSingleton<DiscordSocketClient>()
-            .AddSingleton<CommandService>()
-            .AddSingleton<CommandHandlingService>()
-            .BuildServiceProvider();
+            await Task.Delay(Timeout.Infinite);
+        }
+
+        private Task OnReady()
+        {
+            // Logs the bot name and all the servers that it's connected to
+            Console.WriteLine($"Connected to these servers as '{_client.CurrentUser.Username}': ");
+            foreach (var guild in _client.Guilds)
+                Console.WriteLine($"- {guild.Name}");
+
+            // Set the activity from the environment variable or fallback to 'I'm alive!'
+            _client.SetGameAsync(_configuration["DiscordBot:ACTIVITY"] ?? "I'm alive!",
+                type: ActivityType.CustomStatus);
+            Console.WriteLine($"Activity set to '{_client.Activity.Name}'");
+
+            return Task.CompletedTask;
+        }
+
+        private static Task LogAsync(LogMessage log)
+        {
+            Console.WriteLine(log.ToString());
+            return Task.CompletedTask;
+        }
+
+        private static ServiceProvider ConfigureServices()
+        {
+            return new ServiceCollection()
+                .AddSingleton<DiscordSocketClient>()
+                .AddSingleton<CommandService>()
+                .AddSingleton<CommandHandlingService>()
+                .BuildServiceProvider();
+        }
     }
 }
