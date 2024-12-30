@@ -390,6 +390,4 @@ FodyWeavers.xsd
 *.sln.iml
 
 
-DiscordNetBotTemplate/appsettings.Local.json
-DiscordNetBotTemplate/appsettings.Local.json
-DiscordNetBotTemplate/appsettings.Local.json
+./appsettings.Local.json
