@@ -391,3 +391,4 @@ FodyWeavers.xsd
 
 
 ./appsettings.Local.json
+DiscordNetBotTemplate/appsettings.Local.json

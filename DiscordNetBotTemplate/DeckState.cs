@@ -19,7 +19,7 @@ namespace GFDeckMaid
         public List<int> dominanceMark;
         //game state
         public Dictionary<string, Player> players;
-        public List<int> deck, discard, dominance;
+        public List<int> deck, discard, dominance, trim;
 
         public DeckState(string gameName)
         {

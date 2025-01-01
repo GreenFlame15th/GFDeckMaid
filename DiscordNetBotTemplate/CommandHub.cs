@@ -117,6 +117,10 @@ public class CommandHub
                 case "crafted":
                     await Crafted(message);
                     break;
+                case "trimdeck":
+                    await TrimDeck(args.GetRange(1, args.Count - 1), message);
+                    break;
+
                 default:
                     await message.Channel.SendMessageAsync($"whoopsy not a command I know");
                     break;
@@ -130,7 +134,24 @@ public class CommandHub
             await message.Channel.SendMessageAsync($":boom:error:boom:: {ex.Message}");
         }
     }
+    public async Task TrimDeck(SocketMessage message)
+    {
+        var deck = DBConnection.dBConnection.GetDeck(message);
+        if (deck is null)
+        {
+            return;
+        }
 
+        var discardImage = await GetCardImage(deck.discard, message, deck, 10);
+        if (discardImage != null)
+        {
+            await message.Channel.SendFileAsync(discardImage, "DiscardCards.png", text: $"{megublush} discard pile:");
+        }
+        else
+        {
+            await message.Channel.SendMessageAsync($"{megublush} discard pile is empty");
+        }
+    }
     public async Task ViewDiscard(SocketMessage message)
     {
         var deck = DBConnection.dBConnection.GetDeck(message);
@@ -149,7 +170,6 @@ public class CommandHub
             await message.Channel.SendMessageAsync($"{megublush} discard pile is empty");
         }
     }
-
     public async Task ViewDominance(SocketMessage message)
     {
         var deck = DBConnection.dBConnection.GetDeck(message);
@@ -168,7 +188,6 @@ public class CommandHub
             await message.Channel.SendMessageAsync($"{mommyplease} dominance pile is empty");
         }
     }
-
     private async Task Draw(List<string> args, SocketMessage message)
     {
 
@@ -215,7 +234,6 @@ public class CommandHub
         DBConnection.dBConnection.SaveDeck(deck, message);
         await MyHand(message, deck);
     }
-
     public async Task Discard(List<string> args, SocketMessage message)
     {
         var deck = DBConnection.dBConnection.GetDeck(message);
@@ -322,8 +340,49 @@ public class CommandHub
         deck.dominanceMark = intArgs;
         DBConnection.dBConnection.SaveDeck(deck, message);
         var dominanceCards = await GetCardImage(intArgs, message, deck, 7);
-        await message.Channel.SendFileAsync(dominanceCards, "dominanceCards.png", text: $"Marked those as dominance {gmowo}");
+        if(dominanceCards != null)
+        {
+            await message.Channel.SendFileAsync(dominanceCards, "dominanceCards.png", text: $"Marked those as dominance {gmowo}");
+        }
+        else
+        {
+            await message.Channel.SendMessageAsync($"dommom nu nun nulll {gmowo}");
+        }
+    }
+    public async Task TrimDeck(List<string> args, SocketMessage message)
+    {
+        var deck = DBConnection.dBConnection.GetDeck(message);
+        if (deck is null)
+        {
+            return;
+        }
 
+        List<int> intArgs = new List<int>();
+
+        foreach (string arg in args)
+        {
+            if (int.TryParse(arg, out int num))
+            {
+                intArgs.Add(num);
+            }
+            else
+            {
+                await message.Channel.SendMessageAsync($"Cannot parse {arg} {owoblush}");
+                return;
+            }
+        }
+
+        deck.trim = intArgs;
+        DBConnection.dBConnection.SaveDeck(deck, message);
+        var trimedCards = await GetCardImage(intArgs, message, deck, 7);
+        if (trimedCards != null)
+        {
+            await message.Channel.SendFileAsync(trimedCards, "dominanceCards.png", text: $"Marked those as dominance {gmowo}");
+        }
+        else
+        {
+            await message.Channel.SendMessageAsync($"dommom nu nun nulll {gmowo}");
+        }
     }
     public async Task MyHand(SocketMessage message)
     {
@@ -423,7 +482,7 @@ public class CommandHub
         }
 
         var handImage = await GetCardImage(deck.GetPlayer(target.Id).cards, message, deck, 10);
-        await message.Channel.SendMessageAsync($"{message.Author.Mention} is peoping on {target.Mention} {pantiesowo}");
+        await message.Channel.SendMessageAsync($"{message.Author.Mention} is peeping on {target.Mention} {pantiesowo}");
         if (handImage != null)
         {
             await message.Author.SendFileAsync(handImage, "HandCards.png", text: $"Hand of {target.Mention} {pantiesowo}");
@@ -791,6 +850,10 @@ public class CommandHub
         {
             deckState.deck.Add(i);
         }
+        for (int i = 0; i < deckState.trim.Count; i++)
+        {
+            deckState.deck.Remove(deckState.trim[i]);
+        }
         deckState.deck.Shuffle();
         DBConnection.dBConnection.SaveDeck(deckState, message);
     }
@@ -870,7 +933,6 @@ public class CommandHub
             await message.Channel.SendMessageAsync($"No crafted cards {owoblush}");
         }
     }
-
     public async Task Crafted(SocketMessage message)
     {
         var deck = DBConnection.dBConnection.GetDeck(message);
@@ -937,5 +999,6 @@ public class CommandHub
         await ShowCrafted(deck, deck.GetPlayer(message), message);
         await YourHandBoss(message.Author, deck, user, message);
     }
+
 }
 
