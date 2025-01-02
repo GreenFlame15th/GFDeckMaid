@@ -12,6 +12,8 @@ using SixLabors.ImageSharp.Processing;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using MongoDB.Bson.Serialization.Serializers;
+using System.Diagnostics;
+using static MongoDB.Bson.Serialization.Serializers.SerializerHelper;
 
 
 namespace GFDeckMaid;
@@ -120,6 +122,9 @@ public class CommandHub
                 case "trimdeck":
                     await TrimDeck(args.GetRange(1, args.Count - 1), message);
                     break;
+                case "grab":
+                    await Grab(args.GetRange(1, args.Count - 1), message);
+                    break;
 
                 default:
                     await message.Channel.SendMessageAsync($"whoopsy not a command I know");
@@ -133,6 +138,62 @@ public class CommandHub
             Console.WriteLine(ex.StackTrace);
             await message.Channel.SendMessageAsync($":boom:error:boom:: {ex.Message}");
         }
+    }
+    private async Task Grab(List<string> args, SocketMessage message)
+    {
+        var deck = DBConnection.dBConnection.GetDeck(message);
+        if (deck is null)
+        {
+            return;
+        }
+
+        if(!Enum.TryParse<Piles>(args.ElementAtOrDefault(0), true, out Piles pileType))
+        {
+            await message.Channel.SendMessageAsync($"Faild to prase pile{megublush}");
+            return;
+        }
+
+        List<string> cardPositions;
+        var target = message.MentionedUsers.FirstOrDefault();
+        if (target is null)
+        {
+            cardPositions = args.GetRange(1, args.Count - 1);
+            target = message.Author;
+        }
+        else
+        {
+            cardPositions = args.GetRange(1, args.Count - 2);
+        }
+
+        List<int> pile = null;
+        switch (pileType)
+        {
+            case Piles.Discard:
+                pile = deck.discard;
+                break;
+            default:
+                await message.Channel.SendMessageAsync($"Pile type not supported{megublush}");
+                break;
+        }
+
+        var cardPositionsInts = cardPositions.Any() ?
+            await ArgaToIntArgs(message, cardPositions, pile.Count) :
+            new() { pile.Count };
+
+        var player = deck.GetPlayer(message);
+        List<int> cards = new();
+        for (int i = 0; i < cardPositionsInts.Count; i++)
+        {
+            var card = pile[cardPositionsInts[i]-1];
+            cards.Add(card);
+            player.cards.Add(card);
+            pile.RemoveAt(cardPositionsInts[i]-1);
+        }
+
+        var cardImage = await GetCardImage(cards, message, deck, 10);
+        await message.Channel.SendFileAsync(cardImage, "cards.png", text: $"Cards grabbed {gmowo}");
+        DBConnection.dBConnection.SaveDeck(deck, message);
+        await YourHandBoss(message.Author, deck, player, message);
     }
     public async Task TrimDeck(SocketMessage message)
     {
@@ -245,7 +306,7 @@ public class CommandHub
         var player = deck.GetPlayer(message);
         var playerHandLimit = player.cards.Count;
 
-        var intArgs = await ArgaToHandCards(message, args, playerHandLimit);
+        var intArgs = await ArgaToIntArgs(message, args, playerHandLimit);
         if(intArgs is null)
         {
             return;
@@ -274,7 +335,7 @@ public class CommandHub
         var handImage = await GetCardImage(cards, message, deck, 7);
         await message.Channel.SendFileAsync(handImage, "cards.png", text: $"Tossed those to the discard pile {gmowo}");
     }
-    private async Task<List<int>> ArgaToHandCards(SocketMessage message, List<string> args, int playerHandLimit)
+    private async Task<List<int>> ArgaToIntArgs(SocketMessage message, List<string> args, int limit)
     {
         List<int> intArgs = new List<int>();
 
@@ -296,9 +357,9 @@ public class CommandHub
             await message.Channel.SendMessageAsync($"No cards to use {owoblush}");
             return null;
         }
-        if (intArgs.Any(num => num < 1 || num > playerHandLimit))
+        if (intArgs.Any(num => num < 1 || num > limit))
         {
-            await message.Channel.SendMessageAsync($"Card count in target are limited to {playerHandLimit} cards {owoblush}");
+            await message.Channel.SendMessageAsync($"Card count in target are limited to {limit} cards {owoblush}");
             return null;
         }
         if (intArgs.GroupBy(num => num).Any(g => g.Count() > 1))
@@ -306,7 +367,7 @@ public class CommandHub
             await message.Channel.SendMessageAsync($"Cannot discard same card twice {owoblush}");
             return null;
         }
-        return intArgs;
+        return intArgs.OrderBy(i => -i).ToList();
     }
     public async Task Dominance(List<string> args, SocketMessage message)
     {
@@ -432,7 +493,7 @@ public class CommandHub
 
         var player = deck.GetPlayer(message);
 
-        var intArgs = await ArgaToHandCards(message, args, player.cards.Count);
+        var intArgs = await ArgaToIntArgs(message, args, player.cards.Count);
         if (intArgs is null)
         {
             return;
@@ -580,7 +641,7 @@ public class CommandHub
 
         var targetPlayer = deck.GetPlayer(target.Id);
 
-        var intArgs = await ArgaToHandCards(message, args.Take(args.Count - 1).ToList(), user.cards.Count);
+        var intArgs = await ArgaToIntArgs(message, args.Take(args.Count - 1).ToList(), user.cards.Count);
         if(intArgs is null)
         {
             return;
@@ -620,7 +681,7 @@ public class CommandHub
         }
 
         var user = deck.GetPlayer(message);
-        var intArgs = await ArgaToHandCards(message, args.Take(args.Count - 1).ToList(), targetPlayer.cards.Count);
+        var intArgs = await ArgaToIntArgs(message, args.Take(args.Count - 1).ToList(), targetPlayer.cards.Count);
         if (intArgs is null)
         {
             return;
@@ -955,7 +1016,7 @@ public class CommandHub
 
         var user = deck.GetPlayer(message);
 
-        var intArgs = await ArgaToHandCards(message, args.ToList(), user.cards.Count);
+        var intArgs = await ArgaToIntArgs(message, args.ToList(), user.cards.Count);
         if (intArgs is null)
         {
             return;
@@ -982,7 +1043,7 @@ public class CommandHub
 
         var user = deck.GetPlayer(message);
 
-        var intArgs = await ArgaToHandCards(message, args.ToList(), user.cards.Count);
+        var intArgs = await ArgaToIntArgs(message, args.ToList(), user.cards.Count);
         if (intArgs is null)
         {
             return;
