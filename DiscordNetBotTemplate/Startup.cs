@@ -18,7 +18,7 @@ using Newtonsoft.Json.Linq;
 namespace DiscordNetBotTemplate;
 public class Startup
 {
-    private DiscordSocketClient _client;
+    public static DiscordSocketClient _client;
     private IConfiguration _configuration;
     private readonly List<Task> CurentJobs = new();
 
@@ -82,6 +82,7 @@ public class Startup
         Console.WriteLine($"Connected to these servers as '{_client.CurrentUser.Username}': ");
         foreach (var guild in _client.Guilds)
         {
+            CurentJobs.Add(Task.Run(() => guild.DownloadUsersAsync()));
             Console.WriteLine($"- {guild.Name}");
         }
 

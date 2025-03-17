@@ -9,11 +9,8 @@ using System.Threading.Tasks;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
-using System.Numerics;
-using System.Runtime.CompilerServices;
-using MongoDB.Bson.Serialization.Serializers;
-using System.Diagnostics;
-using static MongoDB.Bson.Serialization.Serializers.SerializerHelper;
+using GFDeckMaid.Enums;
+using DiscordNetBotTemplate;
 
 
 namespace GFDeckMaid;
@@ -123,7 +120,22 @@ public class CommandHub
                     await TrimDeck(args.GetRange(1, args.Count - 1), message);
                     break;
                 case "grab":
-                    await Grab(args.GetRange(1, args.Count - 1), message);
+                    await UsePileAction(args.GetRange(1, args.Count - 1), message, PileAction.grab);
+                    break;
+                case "put":
+                    await UsePileAction(args.GetRange(1, args.Count - 1), message, PileAction.put);
+                    break;
+                case "show":
+                    await UsePileAction(args.GetRange(1, args.Count - 1), message, PileAction.show);
+                    break;
+                case "count":
+                    await UsePileAction(args.GetRange(1, args.Count - 1), message, PileAction.count);
+                    break;
+                case "view":
+                    await UsePileAction(args.GetRange(1, args.Count - 1), message, PileAction.view);
+                    break;
+                case "plot":
+                    await Plot(args.GetRange(1, args.Count - 1), message);
                     break;
 
                 default:
@@ -132,6 +144,10 @@ public class CommandHub
 
             }
         }
+        catch (CommandEarlyExist)
+        {
+            return;
+        }
         catch (Exception ex)
         {
             Console.WriteLine(ex.Message);
@@ -139,61 +155,219 @@ public class CommandHub
             await message.Channel.SendMessageAsync($":boom:error:boom:: {ex.Message}");
         }
     }
-    private async Task Grab(List<string> args, SocketMessage message)
+    private async Task UsePileAction(List<string> args, SocketMessage message, PileAction action)
     {
         var deck = DBConnection.dBConnection.GetDeck(message);
-        if (deck is null)
-        {
-            return;
-        }
 
-        if(!Enum.TryParse<Piles>(args.ElementAtOrDefault(0), true, out Piles pileType))
+        if(!Enum.TryParse(args.ElementAtOrDefault(0), true, out Piles pileType))
         {
             await message.Channel.SendMessageAsync($"Faild to prase pile{megublush}");
             return;
         }
 
+        var isRand = args.ElementAtOrDefault(1) == "rand"; 
         List<string> cardPositions;
         var target = message.MentionedUsers.FirstOrDefault();
         if (target is null)
         {
-            cardPositions = args.GetRange(1, args.Count - 1);
+            cardPositions = isRand ? null : args.GetRange(1, args.Count - 1);
             target = message.Author;
         }
         else
         {
-            cardPositions = args.GetRange(1, args.Count - 2);
+            cardPositions = isRand ? null : args.GetRange(1, args.Count - 2);
         }
 
+        var targetPlayer = deck.GetPlayer(target.Id);
         List<int> pile = null;
         switch (pileType)
         {
             case Piles.Discard:
                 pile = deck.discard;
                 break;
+            case Piles.Facedown:
+                pile = targetPlayer.facedown;
+                break;
+            case Piles.Faceup:
+                pile = targetPlayer.faceup;
+                break;
             default:
-                await message.Channel.SendMessageAsync($"Pile type not supported{megublush}");
+                await message.Channel.SendMessageAsync($"Pile type not supported {megublush}");
                 break;
         }
 
-        var cardPositionsInts = cardPositions.Any() ?
-            await ArgaToIntArgs(message, cardPositions, pile.Count) :
-            new() { pile.Count };
+        switch(action)
+        {
+            case PileAction.grab:
+                await Grab(cardPositions, message, deck, pile, pileType, target);
+                break;
+            case PileAction.put:
+                await Put(cardPositions, message, deck, pile, pileType, target);
+                break;
+            case PileAction.count:
+                await Count(message, pile, pileType, target);
+                break;
+            case PileAction.show:
+                await Show(message, deck, pile, pileType, target);
+                break;
+            case PileAction.view:
+                await View(message, deck, pile, pileType, target);
+                break;
+        }
+    }
+    public async Task Put(List<string> cardPositions, SocketMessage message, DeckState deck, List<int> pile, Piles pileType, SocketUser target)
+    {
+        var user = deck.GetPlayer(message);
 
-        var player = deck.GetPlayer(message);
+        cardPositions ??= new() { (ThreadSafeRandom.ThisThreadsRandom.Next(pile.Count - 1) + 1).ToString() };
+        var cardPositionsInts = cardPositions.Any() ?
+            await ArgaToIntArgs(message, cardPositions, user.hand.Count) :
+            new() { pile.Count };
+        
         List<int> cards = new();
         for (int i = 0; i < cardPositionsInts.Count; i++)
         {
-            var card = pile[cardPositionsInts[i]-1];
+            var card = user.hand[cardPositionsInts[i] - 1];
             cards.Add(card);
-            player.cards.Add(card);
-            pile.RemoveAt(cardPositionsInts[i]-1);
+            pile.Add(card);
+            user.hand.RemoveAt(cardPositionsInts[i] - 1);
         }
 
-        var cardImage = await GetCardImage(cards, message, deck, 10);
-        await message.Channel.SendFileAsync(cardImage, "cards.png", text: $"Cards grabbed {gmowo}");
         DBConnection.dBConnection.SaveDeck(deck, message);
-        await YourHandBoss(message.Author, deck, player, message);
+        var apend = message.MentionedUsers.Any() ? $" of {target.Mention}" : "";
+        var pileCards = await GetCardImage(pile, message, deck, 10);
+        if (pileType.IsPublic())
+        {
+            await message.Channel.SendFileAsync(pileCards, "pileCards.png", text: $"Cards in {pileType} pile{apend} {gmuwu}");
+            await YourHandBoss(message.Author, deck, user, message);
+        }
+        else
+        {
+            await message.Channel.SendMessageAsync($"{gmuwu} {cardPositionsInts.Count} cards added to {target.Mention} {pileType}, for total of {pile.Count} cards{apend} {tinyGreen}");
+            await YourHandBoss(message.Author, deck, user, message);
+            await target.SendFileAsync(pileCards, "pileCards.png", text: $"Your {pileType} cards {gmowo}");
+        }
+    }
+    public async Task Show(SocketMessage message, DeckState deck, List<int> pile, Piles pileType, SocketUser target)
+    {
+        var apend = message.MentionedUsers.Any() ? $" of {target.Mention}" : "";
+        var pileCards = await GetCardImage(pile, message, deck, 10);
+        await message.Channel.SendFileAsync(pileCards, "pileCards.png", text: $"Cards in {pileType} pile{apend} {gmuwu}");
+    }
+    public async Task Count(SocketMessage message, List<int> pile, Piles pileType, SocketUser target)
+    {
+        var apend = message.MentionedUsers.Any() ? $" of {target.Mention}" : "";
+        await message.Channel.SendMessageAsync($"There are {pile.Count} cards in {pileType} pile{apend} {gmuwu}");
+    }
+    public async Task View(SocketMessage message, DeckState deck, List<int> pile, Piles pileType, SocketUser target)
+    {
+        var apend = message.MentionedUsers.Any() ? $" of {target.Mention}" : "";
+        await message.Channel.SendMessageAsync($"{message.Author.Mention} is looking at {pileType}{apend} {gmowo}");
+        var pileCards = await GetCardImage(pile, message, deck, 10);
+        await (await ValidateUser(message.Author, message)).SendFileAsync(pileCards, "pileCards.png", text: $"Cards in {pileType} pile{apend} {pantiesowo}");
+    }
+    public async Task Grab(List<string> cardPositions, SocketMessage message, DeckState deck, List<int> pile, Piles pileType, SocketUser target)
+    {
+        cardPositions ??= new() { (ThreadSafeRandom.ThisThreadsRandom.Next(pile.Count - 1) + 1).ToString() };
+        var cardPositionsInts = cardPositions.Any() ?
+            await ArgaToIntArgs(message, cardPositions, pile.Count) :
+            new() { pile.Count };
+        var user = deck.GetPlayer(message);
+
+        List<int> cards = new();
+        for (int i = 0; i < cardPositionsInts.Count; i++)
+        {
+            var card = pile[cardPositionsInts[i] - 1];
+            cards.Add(card);
+            user.hand.Add(card);
+            pile.RemoveAt(cardPositionsInts[i] - 1);
+        }
+        DBConnection.dBConnection.SaveDeck(deck, message);
+        var apend = message.MentionedUsers.Any() ? $" of {target.Mention}" : "";
+        var pileCards = await GetCardImage(cards, message, deck, 10);
+        if (pileType.IsPublic())
+        {
+            await message.Channel.SendFileAsync(pileCards, "pileCards.png", text: $"Cards grabbed {gmowo}");
+            await YourHandBoss(target, deck, user, message);
+        }
+        else
+        {
+            await message.Channel.SendMessageAsync($"{gmuwu} {cardPositionsInts.Count} cards taken from {pileType} pile{apend}, {pile.Count} remain {tinyGreen}");
+            await YourHandBoss(target, deck, user, message);
+            await target.SendFileAsync(pileCards, "pileCards.png", text: $"Your {pileType} cards {gmowo}");
+        }
+    }
+    public async Task Plot(List<string> args, SocketMessage message)
+    {
+        if (message.Channel is IGuildChannel)
+        {
+            if (message.Channel is not ITextChannel textChannel)
+            {
+                throw new Exception("message is in IGuildChannel that is not ITextChannel");
+            }
+
+            var plotToShow = args.ElementAtOrDefault(0);
+            if (plotToShow is null)
+            {
+                await textChannel.SendMessageAsync($"Use game name `{DBConnection.GetGameName(message)}` to plot in DMs {tinyGreen}");
+                throw new CommandEarlyExist();
+            }
+
+            var deckWithPlot = DBConnection.dBConnection.GetDeck(message);
+
+            if(!deckWithPlot.plots.TryGetValue(plotToShow, out string plotFromDB))
+            {
+                await textChannel.SendMessageAsync($"Plot `{plotToShow}` not found {megublush}");
+                throw new CommandEarlyExist();
+            }
+
+            await textChannel.SendMessageAsync($"Plot `{plotToShow}` is {plotFromDB} {gmowo}");
+            throw new CommandEarlyExist();
+        }
+
+        var plotId = args.ElementAtOrDefault(1);
+        if (plotId == null)
+        {
+            await message.Channel.SendMessageAsync($"Plot id not set {megublush}");
+            throw new CommandEarlyExist();
+        }
+
+        if(String.IsNullOrWhiteSpace(args.ElementAtOrDefault(2)))
+        {
+            await message.Channel.SendMessageAsync($"Plot cannot be empty");
+            throw new CommandEarlyExist();
+        }
+
+        var gameName = args.ElementAtOrDefault(0);
+        if(!DBConnection.dBConnection.TryGetDeck(gameName, out DeckState deck))
+        {
+            await message.Channel.SendMessageAsync($"Game {gameName} not found {megublush}");
+            throw new CommandEarlyExist();
+        }
+
+        var plot = string.Join(" ", args.GetRange(2, args.Count - 2));
+        deck.plots ??= new();
+        deck.plots[plotId] = plot;
+        string[] parts = gameName.Split('_');
+
+        if (!ulong.TryParse(parts[0], out ulong guildId))
+            throw new FormatException($"Failed to pasre Guild ID from game id {megublush}");
+
+        if (!ulong.TryParse(parts[1], out ulong channelId))
+            throw new FormatException($"Failed to pasre Channel ID from game id {megublush}");
+        var guild = Startup._client.GetGuild(guildId);
+        var channel = guild.GetTextChannel(channelId);
+
+        if (channel != null)
+        {
+            DBConnection.dBConnection.SaveDeck(deck, gameName);
+            await channel.SendMessageAsync($"{message.Author.Mention} set plot {plotId}");
+            await message.Channel.SendMessageAsync($"Plot `{plotId}` set to {plot} {tinyGreen}");
+        }
+        else
+        {
+            await message.Channel.SendMessageAsync($"Failed ot find channel {megublush}");
+        }
     }
     public async Task TrimDeck(SocketMessage message)
     {
@@ -289,7 +463,7 @@ public class CommandHub
         while (i < count && await CanDraw(message, deck, i))
         {
             i++;
-            player.cards.Add(deck.deck[0]);
+            player.hand.Add(deck.deck[0]);
             deck.deck.RemoveAt(0);
         }
         DBConnection.dBConnection.SaveDeck(deck, message);
@@ -304,7 +478,7 @@ public class CommandHub
         }
 
         var player = deck.GetPlayer(message);
-        var playerHandLimit = player.cards.Count;
+        var playerHandLimit = player.hand.Count;
 
         var intArgs = await ArgaToIntArgs(message, args, playerHandLimit);
         if(intArgs is null)
@@ -317,8 +491,8 @@ public class CommandHub
 
         foreach (var arg in sortedArgs)
         {
-            var card = player.cards[arg - 1];
-            cards.Add(player.cards[arg - 1]);
+            var card = player.hand[arg - 1];
+            cards.Add(player.hand[arg - 1]);
             if (deck.dominanceMark.Contains(card))
             {
                 deck.dominance.Add(card);
@@ -327,7 +501,7 @@ public class CommandHub
             {
                 deck.discard.Add(card);
             }
-            player.cards.RemoveAt(arg - 1);
+            player.hand.RemoveAt(arg - 1);
         }
 
         DBConnection.dBConnection.SaveDeck(deck, message);
@@ -348,24 +522,24 @@ public class CommandHub
             else
             {
                 await message.Channel.SendMessageAsync($"Cannot parse {args} {owoblush}");
-                return null;
+                throw new CommandEarlyExist();
             }
         }
 
         if (!intArgs.Any())
         {
             await message.Channel.SendMessageAsync($"No cards to use {owoblush}");
-            return null;
+            throw new CommandEarlyExist();
         }
         if (intArgs.Any(num => num < 1 || num > limit))
         {
             await message.Channel.SendMessageAsync($"Card count in target are limited to {limit} cards {owoblush}");
-            return null;
+            throw new CommandEarlyExist();
         }
         if (intArgs.GroupBy(num => num).Any(g => g.Count() > 1))
         {
             await message.Channel.SendMessageAsync($"Cannot discard same card twice {owoblush}");
-            return null;
+            throw new CommandEarlyExist();
         }
         return intArgs.OrderBy(i => -i).ToList();
     }
@@ -413,10 +587,6 @@ public class CommandHub
     public async Task TrimDeck(List<string> args, SocketMessage message)
     {
         var deck = DBConnection.dBConnection.GetDeck(message);
-        if (deck is null)
-        {
-            return;
-        }
 
         List<int> intArgs = new List<int>();
 
@@ -429,7 +599,7 @@ public class CommandHub
             else
             {
                 await message.Channel.SendMessageAsync($"Cannot parse {arg} {owoblush}");
-                return;
+                throw new CommandEarlyExist();
             }
         }
 
@@ -448,17 +618,13 @@ public class CommandHub
     public async Task MyHand(SocketMessage message)
     {
         var deck = DBConnection.dBConnection.GetDeck(message);
-        if (deck is null)
-        {
-            return;
-        }
         await MyHand(message, deck);
     }
     private async Task MyHand(SocketMessage message, DeckState deck)
     {
-        var cards = deck.GetPlayer(message).cards;
+        var cards = deck.GetPlayer(message).hand;
         await message.Channel.SendMessageAsync($"You have {cards.Count} cards {tinyGreen}");
-        var handImage = await GetCardImage(deck.GetPlayer(message).cards, message, deck, 7);
+        var handImage = await GetCardImage(deck.GetPlayer(message).hand, message, deck, 7);
         if (handImage != null)
         {
             await message.Author.SendFileAsync(handImage, "cards.png", text: $"Here is your hand boss {pantiesowo}");
@@ -466,22 +632,38 @@ public class CommandHub
     }
     private async Task YourHandBoss(SocketUser user, DeckState deck, Player player, SocketMessage message)
     {
+        user = await ValidateUser(user, message); 
 
         var channel = (message.Channel as IGuildChannel);
         if (channel == null)
         { 
             await message.Channel.SendMessageAsync($"This not be working in DMs sowwy {owoblush}.");
-            return;
+            throw new CommandEarlyExist();
         }
 
         var socketGuild = channel.Guild as SocketGuild;
         var guildUser = socketGuild.GetUser(user.Id);
 
-        var handImage = await GetCardImage(player.cards, message, deck, 7);
+        var handImage = await GetCardImage(player.hand, message, deck, 7);
         if (handImage != null)
         {
             await guildUser.SendFileAsync(handImage, "cards.png", text: $"Here is your hand boss {pantiesowo}");
         }
+    }
+    public async Task<SocketUser> ValidateUser(SocketUser user, SocketMessage message)
+    {
+        if(user is not SocketGuildUser)
+        {
+            var guild = (message.Channel as SocketGuildChannel)?.Guild;
+            if(guild == null)
+            {
+                await message.Channel.SendMessageAsync($"Guild not found sowwy {owoblush}.");
+                throw new CommandEarlyExist();
+            }
+            await guild.DownloadUsersAsync();
+            return guild.GetUser(user.Id);
+        }
+        return user;
     }
     public async Task ShowCards(List<string> args, SocketMessage message)
     {
@@ -493,13 +675,13 @@ public class CommandHub
 
         var player = deck.GetPlayer(message);
 
-        var intArgs = await ArgaToIntArgs(message, args, player.cards.Count);
+        var intArgs = await ArgaToIntArgs(message, args, player.hand.Count);
         if (intArgs is null)
         {
             return;
         }
 
-        var cards = intArgs.Select(arg => player.cards[arg]);
+        var cards = intArgs.Select(arg => player.hand[arg]);
 
         var cardsImage = await GetCardImage(cards.ToList(), message, deck, 10);
         if (cardsImage != null)
@@ -519,7 +701,7 @@ public class CommandHub
             return;
         }
 
-        var handImage = await GetCardImage(deck.GetPlayer(message).cards, message, deck, 10);
+        var handImage = await GetCardImage(deck.GetPlayer(message).hand, message, deck, 10);
         if (handImage != null)
         {
             await message.Channel.SendFileAsync(handImage, "HandCards.png", text: $"Your hand 💚");
@@ -542,7 +724,7 @@ public class CommandHub
             await message.Channel.SendMessageAsync($"You need to @ somebody {tinyGreen}");
         }
 
-        var handImage = await GetCardImage(deck.GetPlayer(target.Id).cards, message, deck, 10);
+        var handImage = await GetCardImage(deck.GetPlayer(target.Id).hand, message, deck, 10);
         await message.Channel.SendMessageAsync($"{message.Author.Mention} is peeping on {target.Mention} {pantiesowo}");
         if (handImage != null)
         {
@@ -568,19 +750,19 @@ public class CommandHub
         }
 
         var targetPlayer = deck.GetPlayer(target.Id);
-        if (!targetPlayer.cards.Any())
+        if (!targetPlayer.hand.Any())
         {
             await message.Channel.SendMessageAsync($"{target.Mention} has no cards to take {owoblush}");
         }
 
         var user = deck.GetPlayer(message);
 
-        int rand = targetPlayer.cards.GetRandPosition();
-        user.cards.Add(targetPlayer.cards[rand]);
-        targetPlayer.cards.RemoveAt(rand);
+        int rand = targetPlayer.hand.GetRandPosition();
+        user.hand.Add(targetPlayer.hand[rand]);
+        targetPlayer.hand.RemoveAt(rand);
 
         DBConnection.dBConnection.SaveDeck(deck, message);
-        await message.Channel.SendMessageAsync($"You have {user.cards.Count} cards {tinyGreen}\n{target.Mention} has {targetPlayer.cards.Count} cards1 {tinyGreen}");
+        await message.Channel.SendMessageAsync($"You have {user.hand.Count} cards {tinyGreen}\n{target.Mention} has {targetPlayer.hand.Count} cards! {tinyGreen}");
         await Task.WhenAll(
             YourHandBoss(message.Author, deck, user, message),
             YourHandBoss(target, deck, targetPlayer, message)
@@ -601,19 +783,19 @@ public class CommandHub
         }
 
         var targetPlayer = deck.GetPlayer(target.Id);
-        if (!targetPlayer.cards.Any())
+        if (!targetPlayer.hand.Any())
         {
             await message.Channel.SendMessageAsync($"{target.Mention} has no cards to take {owoblush}");
         }
 
         var user = deck.GetPlayer(message);
 
-        int rand = user.cards.GetRandPosition();
-        targetPlayer.cards.Add(user.cards[rand]);
-        user.cards.RemoveAt(rand);
+        int rand = user.hand.GetRandPosition();
+        targetPlayer.hand.Add(user.hand[rand]);
+        user.hand.RemoveAt(rand);
 
         DBConnection.dBConnection.SaveDeck(deck, message);
-        await message.Channel.SendMessageAsync($"You have {user.cards.Count} cards {tinyGreen}\n{target.Mention} has {targetPlayer.cards.Count} cards1 {tinyGreen}");
+        await message.Channel.SendMessageAsync($"You have {user.hand.Count} cards {tinyGreen}\n{target.Mention} has {targetPlayer.hand.Count} cards1 {tinyGreen}");
         await Task.WhenAll(
             YourHandBoss(message.Author, deck, user, message),
             YourHandBoss(target, deck, targetPlayer, message)
@@ -622,39 +804,33 @@ public class CommandHub
     public async Task GiveCard(List<string> args, SocketMessage message)
     {
         var deck = DBConnection.dBConnection.GetDeck(message);
-        if (deck is null)
-        {
-            return;
-        }
 
         var target = message.MentionedUsers?.FirstOrDefault();
         if (target is null)
         {
             await message.Channel.SendMessageAsync($"You need to @ somebody {tinyGreen}");
+            throw new CommandEarlyExist();
         }
 
         var user = deck.GetPlayer(message);
-        if (!user.cards.Any())
+        if (!user.hand.Any())
         {
             await message.Channel.SendMessageAsync($"You has no cards to give {owoblush}");
+            throw new CommandEarlyExist();
         }
 
         var targetPlayer = deck.GetPlayer(target.Id);
 
-        var intArgs = await ArgaToIntArgs(message, args.Take(args.Count - 1).ToList(), user.cards.Count);
-        if(intArgs is null)
-        {
-            return;
-        }
+        var intArgs = await ArgaToIntArgs(message, args.Take(args.Count - 1).ToList(), user.hand.Count);
 
         foreach(var intArg in intArgs)
         {
-            targetPlayer.cards.Add(user.cards[intArg-1]);
-            user.cards.RemoveAt(intArg-1);
+            targetPlayer.hand.Add(user.hand[intArg-1]);
+            user.hand.RemoveAt(intArg-1);
         }
 
         DBConnection.dBConnection.SaveDeck(deck, message);
-        await message.Channel.SendMessageAsync($"You have {user.cards.Count} cards {tinyGreen}\n{target.Mention} has {targetPlayer.cards.Count} cards1 {tinyGreen}");
+        await message.Channel.SendMessageAsync($"You have {user.hand.Count} cards {tinyGreen}\n{target.Mention} has {targetPlayer.hand.Count} cards1 {tinyGreen}");
         await Task.WhenAll(
             YourHandBoss(message.Author, deck, user, message),
             YourHandBoss(target, deck, targetPlayer, message)
@@ -675,13 +851,13 @@ public class CommandHub
         }
 
         var targetPlayer = deck.GetPlayer(target.Id);
-        if (!targetPlayer.cards.Any())
+        if (!targetPlayer.hand.Any())
         {
             await message.Channel.SendMessageAsync($"{target.Mention} has no cards to take {owoblush}");
         }
 
         var user = deck.GetPlayer(message);
-        var intArgs = await ArgaToIntArgs(message, args.Take(args.Count - 1).ToList(), targetPlayer.cards.Count);
+        var intArgs = await ArgaToIntArgs(message, args.Take(args.Count - 1).ToList(), targetPlayer.hand.Count);
         if (intArgs is null)
         {
             return;
@@ -689,12 +865,12 @@ public class CommandHub
 
         foreach (var intArg in intArgs)
         {
-            user.cards.Add(targetPlayer.cards[intArg - 1]);
-            targetPlayer.cards.RemoveAt(intArg - 1);
+            user.hand.Add(targetPlayer.hand[intArg - 1]);
+            targetPlayer.hand.RemoveAt(intArg - 1);
         }
 
         DBConnection.dBConnection.SaveDeck(deck, message);
-        await message.Channel.SendMessageAsync($"You have {user.cards.Count} cards {tinyGreen}\n{target.Mention} has {targetPlayer.cards.Count} cards1 {tinyGreen}");
+        await message.Channel.SendMessageAsync($"You have {user.hand.Count} cards {tinyGreen}\n{target.Mention} has {targetPlayer.hand.Count} cards1 {tinyGreen}");
         await Task.WhenAll(
             YourHandBoss(message.Author, deck, user, message),
             YourHandBoss(target, deck, targetPlayer, message)
@@ -703,18 +879,13 @@ public class CommandHub
     public async Task Hand(SocketMessage message)
     {
         var deck = DBConnection.dBConnection.GetDeck(message);
-        if (deck is null)
-        {
-            return;
-        }
-
         var target = message.MentionedUsers?.FirstOrDefault();
         if (target is null)
         {
             await message.Channel.SendMessageAsync($"You need to @ somebody {tinyGreen}");
         }
 
-        var cards = deck.GetPlayer(target.Id).cards;
+        var cards = deck.GetPlayer(target.Id).hand;
         await message.Channel.SendMessageAsync($"{target.Mention} have {cards.Count} cards {tinyGreen}");
     }
     public async Task<MemoryStream> GetCardImage(List<int> cards, SocketMessage message, DeckState deck, int columns)
@@ -722,12 +893,12 @@ public class CommandHub
         if (deck.columns == 0 || deck.rows == 0 || deck.cardCount == 0 || string.IsNullOrWhiteSpace(deck.imageLink))
         {
             await message.Channel.SendMessageAsync("Deck not set");
-            return null;
+            throw new CommandEarlyExist();
         }
 
         if (cards.Count == 0)
         {
-            return null;
+            throw new CommandEarlyExist();
         }
 
         try
@@ -1016,7 +1187,7 @@ public class CommandHub
 
         var user = deck.GetPlayer(message);
 
-        var intArgs = await ArgaToIntArgs(message, args.ToList(), user.cards.Count);
+        var intArgs = await ArgaToIntArgs(message, args.ToList(), user.hand.Count);
         if (intArgs is null)
         {
             return;
@@ -1043,7 +1214,7 @@ public class CommandHub
 
         var user = deck.GetPlayer(message);
 
-        var intArgs = await ArgaToIntArgs(message, args.ToList(), user.cards.Count);
+        var intArgs = await ArgaToIntArgs(message, args.ToList(), user.hand.Count);
         if (intArgs is null)
         {
             return;
@@ -1051,8 +1222,8 @@ public class CommandHub
 
         foreach(var intArg in intArgs)
         {
-            user.crafted.Add(user.cards[intArg-1]);
-            user.cards.RemoveAt(intArg-1);
+            user.crafted.Add(user.hand[intArg-1]);
+            user.hand.RemoveAt(intArg-1);
 ;       }
 
         await message.Channel.SendMessageAsync($"Craft {intArgs.Count} cards {gmowo}");

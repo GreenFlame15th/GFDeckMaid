@@ -35,10 +35,6 @@ public class DBConnection
     public DeckState GetDeck(SocketMessage message)
     {
         var gameName = GetGameName(message);
-        if(gameName == null)
-        {
-            return null;
-        }
 
         var filter = Builders<BsonDocument>.Filter.Eq(Constants.gameIndex, gameName);
         var document = decks.Find(filter).FirstOrDefault();
@@ -50,15 +46,34 @@ public class DBConnection
 
         return BsonSerializer.Deserialize<DeckState>(document);
     }
+    public bool TryGetDeck(SocketMessage message, out DeckState deck)
+    {
+        var gamename =  GetGameName(message);
+        var result = TryGetDeck(gamename, out DeckState foundDeck);
+        deck = foundDeck;
+        return result;
+    }
 
+    public bool TryGetDeck(string gameName, out DeckState deck)
+    {
+        var filter = Builders<BsonDocument>.Filter.Eq(Constants.gameIndex, gameName);
+        var document = decks.Find(filter).FirstOrDefault();
+        if (document is null)
+        {
+            deck = null;
+            return false;
+        }
+        deck = BsonSerializer.Deserialize<DeckState>(document);
+        return true;
+    }
     public void SaveDeck(DeckState deckState, SocketMessage message)
     {
-        var gameName = GetGameName(message);
-        if (gameName == null)
-        {
-            return;
-        }
+        SaveDeck(deckState, GetGameName(message));
+    }
 
+
+    public void SaveDeck(DeckState deckState, String gameName)
+    {
         // Create a filter to find a document by its ID
         var filter = Builders<BsonDocument>.Filter.Eq("_id", deckState.Id);
         var existingDocument = decks.Find(filter).FirstOrDefault();
@@ -78,12 +93,12 @@ public class DBConnection
         }
     }
 
-    private string GetGameName(SocketMessage message)
+    public static string GetGameName(SocketMessage message)
     {
         if (message is not SocketUserMessage userMessage)
         {
             message.Channel.SendMessageAsync($"Bimg bong SocketUserMessage expected");
-            return null;   
+            throw new CommandEarlyExist();
         }
 
         ulong channelId = userMessage.Channel.Id;
@@ -92,7 +107,7 @@ public class DBConnection
         if(guildId is null)
         {
             message.Channel.SendMessageAsync($"No card peaking in DMs!");
-            return null;
+            throw new CommandEarlyExist();
         }
 
         return $"{guildId}_{channelId}_deck";

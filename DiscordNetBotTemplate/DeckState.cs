@@ -17,19 +17,27 @@ namespace GFDeckMaid
         public int columns, rows, cardCount;
         public string imageLink;
         public List<int> dominanceMark;
-        //game state
+        [BsonIgnoreIfNull]
         public Dictionary<string, Player> players;
-        public List<int> deck, discard, dominance, trim;
+        [BsonIgnoreIfNull]
+        public Dictionary<string, string> plots;
+        public List<int> deck, discard, dominance, trim, slotSouls;
+        public bool lostSoulsOn;
 
         public DeckState(string gameName)
         {
             game = gameName;
+            deck = new();
+            discard = new();
+            dominance = new();
+            trim = new();
         }
 
         [OnDeserialized]
         private void OnDeserialized(StreamingContext context)
         {
             players ??= new Dictionary<string, Player>();
+            plots ??= new Dictionary<string, string>();
         }
 
         public Player GetPlayer(SocketMessage message)
@@ -53,18 +61,20 @@ namespace GFDeckMaid
     [Serializable]
     public class Player
     {
-        public List<int> cards, crafted;
+        public List<int> hand, crafted, facedown, faceup;
 
         public Player()
         {
-            cards = new List<int>();
-            crafted = new List<int>();
+            hand = new();
+            crafted = new();
+            facedown = new();
+            faceup = new();
         }
 
         [OnDeserialized]
         private void OnDeserialized(StreamingContext context)
         {
-            cards ??= new List<int>();
+            hand ??= new List<int>();
         }
     }
 }

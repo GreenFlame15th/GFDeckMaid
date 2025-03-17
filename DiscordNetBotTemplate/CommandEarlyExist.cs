@@ -6,9 +6,7 @@ using System.Threading.Tasks;
 
 namespace GFDeckMaid;
 
-enum Piles
-{
-    Discard,
-    Facedown,
-    Faceup
-}
+    public class CommandEarlyExist : Exception
+    {
+    }
+
